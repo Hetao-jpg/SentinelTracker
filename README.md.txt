@@ -118,6 +118,7 @@ HandleOpacity = 0.8
 - **坐标换算**：`Input.mousePosition` 原点在左下角、IMGUI 屏幕坐标原点在左上角，需要翻转 y
 - **`GUI.depth` / `GUI.color` 的 try-finally 恢复**：`GUI.Window` 内部抛异常时不恢复会污染全局状态
 - **哨兵判定双重回退**：优先 `HealthData.IsSentinel()`，异常时回退到手动遍历 `startingPerks`
+- **`ShowOnlyWhenSentinel` 时跳过整个窗口**：避免出现“只剩标题栏、没有关闭按钮”的空白窗口
 
 ## 已知限制
 
@@ -178,6 +179,8 @@ MelonLoader 读取 cfg 是**启动时**。改完 cfg 需要重启游戏。
 
 - 修复非哨兵玩家看到“安全期 0 天”导致误以为机制在运行的问题
 - 修复“距下一阶段还有 N 天”容易让玩家误以为天数即死期的误导
+- 修复 `ShowOnlyWhenSentinel=true` 时留下空白窗口的问题
+- 修复拖动窗口后位置可能不落盘的问题
 
 ### v1.0.1
 
