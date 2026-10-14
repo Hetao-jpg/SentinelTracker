@@ -3,7 +3,6 @@ using Il2Cpp;
 using MelonLoader;
 using MelonLoader.Preferences;
 using UnityEngine;
-// ── 消除类型歧义：System.Numerics / System.Drawing 同名类型 ──
 using Vector2 = UnityEngine.Vector2;
 using Color = UnityEngine.Color;
 
@@ -24,7 +23,6 @@ public class Core : MelonMod
     private static MelonPreferences_Entry<bool> _cfgShowImmunivaxHint;
     private static MelonPreferences_Entry<float> _cfgUIScale;
 
-    // v1.2.0 新增：真品免疫宁 -1 池
     internal static MelonPreferences_Entry<bool> CfgReducePoolOnGenuineInject;
 
     private const string PP_PANEL_X = "SentinelTracker.PanelX";
@@ -38,18 +36,13 @@ public class Core : MelonMod
     private bool _dataReady;
     private bool _isUIVisible;
 
-    // UI 缩放
-    private float _currentScale = 1f;
+    /// <summary>当前 UI 缩放。每帧在 OnGUI 开头刷新。</summary>
+    private float _S = 1f;
 
-    private Rect _windowRect = new Rect(20f, 20f, 360f, 360f);
+    private Rect _windowRect = new Rect(20f, 20f, 360f, 400f);
     private bool _isResizing;
     private Vector2 _resizeStartMouse;
     private Vector2 _resizeStartSize;
-
-    // 窗口拖动状态（替代 GUI.DragWindow）
-    private bool _isDraggingWindow;
-    private Vector2 _dragStartMouse;
-    private Vector2 _dragStartWindowPos;
 
     // ── 样式 ────────────────────────────────────────────────
     private GUIStyle _titleStyle;
@@ -59,14 +52,16 @@ public class Core : MelonMod
     private GUIStyle _waitStyle;
     private GUIStyle _barStyle;
     private GUIStyle _warnStyle;
+    private GUIStyle _closeStyle;
     private bool _stylesReady;
+    private float _stylesScale = -1f;
     private static GUIStyle _handleStyle;
 
-    // ── 常量（逻辑像素，会随 UIScale 一起放大） ──────────────
+    // ── 常量（逻辑像素） ─────────────────────────────────────
     private const float PANEL_MIN_W = 300f;
     private const float PANEL_MIN_H = 240f;
-    private const float PANEL_MAX_W = 800f;
-    private const float PANEL_MAX_H = 700f;
+    private const float PANEL_MAX_W = 900f;
+    private const float PANEL_MAX_H = 800f;
     private const float HANDLE_SIZE = 22f;
     private const int POOL_MAX = 20;
     private const int POOL_WARN_ADVANCED = 10;
@@ -89,13 +84,11 @@ public class Core : MelonMod
             false, false, (ValueValidator)null, (string)null);
 
         _cfgPanelOpacity = _cfgCategory.CreateEntry<float>(
-            "PanelOpacity", 0.9f, "面板背景透明度",
-            "1.0=不透明，0.1=几乎看不见",
+            "PanelOpacity", 0.9f, "面板背景透明度", "1.0=不透明，0.1=几乎看不见",
             false, false, (ValueValidator)null, (string)null);
 
         _cfgTextOpacity = _cfgCategory.CreateEntry<float>(
-            "TextOpacity", 1f, "文字透明度",
-            "1.0=完全不透明，0.5=半透明",
+            "TextOpacity", 1f, "文字透明度", "1.0=完全不透明，0.5=半透明",
             false, false, (ValueValidator)null, (string)null);
 
         _cfgPanelWidth = _cfgCategory.CreateEntry<float>(
@@ -103,17 +96,16 @@ public class Core : MelonMod
             false, false, (ValueValidator)null, (string)null);
 
         _cfgPanelHeight = _cfgCategory.CreateEntry<float>(
-            "PanelHeight", 360f, "面板高度", "面板高度（逻辑像素，拖右下角调整）",
+            "PanelHeight", 400f, "面板高度", "面板高度（逻辑像素，拖右下角调整）",
             false, false, (ValueValidator)null, (string)null);
 
         _cfgHandleOpacity = _cfgCategory.CreateEntry<float>(
-            "HandleOpacity", 0.6f, "缩放手柄透明度",
-            "右下角缩放手柄透明度，独立于面板背景",
+            "HandleOpacity", 0.6f, "缩放手柄透明度", "右下角缩放手柄透明度",
             false, false, (ValueValidator)null, (string)null);
 
         _cfgShowOnlyWhenSentinel = _cfgCategory.CreateEntry<bool>(
             "ShowOnlyWhenSentinel", false, "仅哨兵玩家显示",
-            "非哨兵存档隐藏监控内容（防止误以为机制在运行）",
+            "非哨兵存档隐藏监控内容",
             false, false, (ValueValidator)null, (string)null);
 
         _cfgShowImmunivaxHint = _cfgCategory.CreateEntry<bool>(
@@ -121,17 +113,14 @@ public class Core : MelonMod
             "在面板下方显示免疫宁成色效果速查",
             false, false, (ValueValidator)null, (string)null);
 
-        // ── UI 自适应缩放 ──
         _cfgUIScale = _cfgCategory.CreateEntry<float>(
             "UIScale", 0f, "UI 缩放",
-            "0=自动按屏幕高度缩放（1080p≈1.2）。手动值范围 0.5~3.0。改后需重启。",
+            "0=自动按屏幕高度缩放（1080p≈1.2）。手动值 0.5~3.0。改后需重启。",
             false, false, (ValueValidator)null, (string)null);
 
-        // ── v1.2.0：真品免疫宁 -1 池 ──
         CfgReducePoolOnGenuineInject = _cfgCategory.CreateEntry<bool>(
-            "ReducePoolOnGenuineInject", false,
-            "真品免疫宁 -1 损伤池",
-            "每注射一支真品免疫宁，损伤池 -1（原版不降，打针只重置天数）。改后需重启游戏。",
+            "ReducePoolOnGenuineInject", false, "真品免疫宁 -1 损伤池",
+            "每注射一支真品免疫宁，损伤池 -1（原版不降）。改后需重启。",
             false, false, (ValueValidator)null, (string)null);
 
         _cfgCategory.SaveToFile(true);
@@ -142,7 +131,6 @@ public class Core : MelonMod
         _windowRect.width = Mathf.Clamp(_cfgPanelWidth.Value, PANEL_MIN_W, PANEL_MAX_W);
         _windowRect.height = Mathf.Clamp(_cfgPanelHeight.Value, PANEL_MIN_H, PANEL_MAX_H);
 
-        // ── Harmony 补丁（真品 -1 池功能） ──
         try
         {
             new HarmonyLib.Harmony("SentinelTracker.Patches")
@@ -154,42 +142,80 @@ public class Core : MelonMod
             LoggerInstance.Error("Harmony patch 失败: " + ex);
         }
 
-        LoggerInstance.Msg($"v1.3.0 已加载，按 {_cfgToggleKey.Value} 开关面板");
+        LoggerInstance.Msg($"v1.4.0 已加载，按 {_cfgToggleKey.Value} 开关面板");
     }
 
     // ══════════════════════════════════════════════════════
-    //  样式（延迟到 OnGUI）
+    //  缩放系数
     // ══════════════════════════════════════════════════════
-    private void EnsureStyles()
+    private float ResolveScale()
     {
-        if (_stylesReady) return;
+        float s;
+        if (_cfgUIScale != null && _cfgUIScale.Value > 0f)
+            s = Mathf.Clamp(_cfgUIScale.Value, 0.5f, 3.0f);
+        else
+            s = Mathf.Clamp(Screen.height / 1080f * 1.2f, 0.75f, 3.0f);
+
+        // 归整到 0.25 的倍数，避免非整数缩放带来的视觉抖动
+        return Mathf.Round(s * 4f) / 4f;
+    }
+
+    /// <summary>把逻辑坐标 / 尺寸按当前 scale 转成屏幕坐标。</summary>
+    private Rect R(float x, float y, float w, float h)
+        => new Rect(x * _S, y * _S, w * _S, h * _S);
+
+    // ══════════════════════════════════════════════════════
+    //  样式（延迟到 OnGUI，随 scale 变化重建）
+    // ══════════════════════════════════════════════════════
+    private void EnsureStyles(float S)
+    {
+        if (_stylesReady && Mathf.Abs(_stylesScale - S) < 0.01f) return;
+        _stylesScale = S;
+
+        int fsTitle = Mathf.RoundToInt(16 * S);
+        int fsData = Mathf.RoundToInt(14 * S);
+        int fsTip = Mathf.RoundToInt(13 * S);
+        int fsHotkey = Mathf.RoundToInt(11 * S);
+        int fsClose = Mathf.RoundToInt(14 * S);
 
         _titleStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 16,
+            fontSize = fsTitle,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleCenter,
         };
 
-        _dataStyle = new GUIStyle(GUI.skin.label) { fontSize = 14 };
+        _dataStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = fsData,
+            alignment = TextAnchor.MiddleCenter,
+        };
         _dataStyle.normal.textColor = Color.white;
-        _dataStyle.alignment = TextAnchor.MiddleCenter;
 
-        _tipStyle = new GUIStyle(GUI.skin.label) { fontSize = 13 };
+        _tipStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = fsTip,
+            alignment = TextAnchor.MiddleCenter,
+        };
         _tipStyle.normal.textColor = new Color(0.85f, 0.85f, 0.85f);
-        _tipStyle.alignment = TextAnchor.MiddleCenter;
 
-        _hotkeyStyle = new GUIStyle(GUI.skin.label) { fontSize = 11 };
+        _hotkeyStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = fsHotkey,
+            alignment = TextAnchor.MiddleRight,
+        };
         _hotkeyStyle.normal.textColor = new Color(0.5f, 0.5f, 0.5f);
-        _hotkeyStyle.alignment = TextAnchor.MiddleRight;
 
-        _waitStyle = new GUIStyle(GUI.skin.label) { fontSize = 14 };
+        _waitStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = fsData,
+            alignment = TextAnchor.MiddleCenter,
+        };
         _waitStyle.normal.textColor = new Color(0.7f, 0.7f, 0.7f);
-        _waitStyle.alignment = TextAnchor.MiddleCenter;
 
         _barStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 14,
+            fontSize = fsData,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleCenter,
         };
@@ -197,10 +223,26 @@ public class Core : MelonMod
 
         _warnStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 14,
+            fontSize = fsData,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleCenter,
         };
+
+        _closeStyle = new GUIStyle(GUI.skin.button)
+        {
+            fontSize = fsClose,
+            alignment = TextAnchor.MiddleCenter,
+        };
+
+        _handleStyle = new GUIStyle(GUI.skin.button)
+        {
+            fontSize = fsClose,
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleCenter,
+        };
+        _handleStyle.normal.textColor = new Color(1f, 0.95f, 0.6f);
+        _handleStyle.hover.textColor = Color.white;
+        _handleStyle.active.textColor = new Color(0.6f, 1f, 0.6f);
 
         _stylesReady = true;
     }
@@ -274,18 +316,6 @@ public class Core : MelonMod
     }
 
     // ══════════════════════════════════════════════════════
-    //  自适应缩放
-    // ══════════════════════════════════════════════════════
-    private float ResolveScale()
-    {
-        if (_cfgUIScale != null && _cfgUIScale.Value > 0f)
-            return Mathf.Clamp(_cfgUIScale.Value, 0.5f, 3.0f);
-
-        // 自动：以 1080p 为基准再放大 1.2 倍（原版字体在 1080p 下偏小）
-        return Mathf.Clamp(Screen.height / 1080f * 1.2f, 0.75f, 3.0f);
-    }
-
-    // ══════════════════════════════════════════════════════
     //  OnGUI
     // ══════════════════════════════════════════════════════
     public override void OnGUI()
@@ -294,18 +324,13 @@ public class Core : MelonMod
 
         int savedDepth = GUI.depth;
         Color savedColor = GUI.color;
-        Matrix4x4 savedMatrix = GUI.matrix;
 
         try
         {
-            EnsureStyles();
-            if (!_stylesReady) return;
-
-            _currentScale = ResolveScale();
+            _S = ResolveScale();
+            EnsureStyles(_S);
 
             GUI.depth = 33000;
-            GUI.matrix = Matrix4x4.Scale(new Vector3(_currentScale, _currentScale, 1f));
-
             float panelAlpha = Mathf.Clamp(_cfgPanelOpacity?.Value ?? 0.9f, 0.1f, 1f);
             GUI.color = new Color(1f, 1f, 1f, panelAlpha);
 
@@ -319,10 +344,19 @@ public class Core : MelonMod
 
             if (!hideForNonSentinel)
             {
-                _windowRect = GUI.Window(
-                    98765, _windowRect,
+                // 屏幕坐标交给 GUI.Window；返回后再转回逻辑坐标
+                Rect scaledRect = R(_windowRect.x, _windowRect.y,
+                                    _windowRect.width, _windowRect.height);
+
+                Rect result = GUI.Window(
+                    98765, scaledRect,
                     (Action<int>)DrawWindow,
                     "哨兵综合症监控");
+
+                _windowRect.x = result.x / _S;
+                _windowRect.y = result.y / _S;
+                _windowRect.width = result.width / _S;
+                _windowRect.height = result.height / _S;
 
                 DrawResizeHandle();
             }
@@ -339,7 +373,6 @@ public class Core : MelonMod
         }
         finally
         {
-            GUI.matrix = savedMatrix;
             GUI.color = savedColor;
             GUI.depth = savedDepth;
         }
@@ -348,12 +381,10 @@ public class Core : MelonMod
     // ══════════════════════════════════════════════════════
     //  鼠标 / 缩放
     // ══════════════════════════════════════════════════════
-    /// <summary>
-    /// 返回 IMGUI 逻辑坐标（已逆变换 scale）。
-    /// </summary>
+    /// <summary>返回 IMGUI 逻辑坐标（已除以 _S）。</summary>
     private Vector2 GetGuiMousePosition()
     {
-        float s = _currentScale > 0f ? _currentScale : 1f;
+        float s = _S > 0f ? _S : 1f;
         return new Vector2(
             Input.mousePosition.x / s,
             (Screen.height - Input.mousePosition.y) / s);
@@ -399,22 +430,9 @@ public class Core : MelonMod
         GUI.color = new Color(1f, 1f, 1f, handleAlpha);
         try
         {
-            if (_handleStyle == null)
-            {
-                _handleStyle = new GUIStyle(GUI.skin.button)
-                {
-                    fontSize = 14,
-                    fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleCenter,
-                };
-                _handleStyle.normal.textColor = new Color(1f, 0.95f, 0.6f);
-                _handleStyle.hover.textColor = Color.white;
-                _handleStyle.active.textColor = new Color(0.6f, 1f, 0.6f);
-            }
-
-            float hx = _windowRect.x + _windowRect.width - HANDLE_SIZE;
-            float hy = _windowRect.y + _windowRect.height - HANDLE_SIZE;
-            GUI.Button(new Rect(hx + 2f, hy + 2f, 18f, 18f), "◢", _handleStyle);
+            float hx = (_windowRect.x + _windowRect.width - HANDLE_SIZE + 2f) * _S;
+            float hy = (_windowRect.y + _windowRect.height - HANDLE_SIZE + 2f) * _S;
+            GUI.Button(new Rect(hx, hy, 18f * _S, 18f * _S), "◢", _handleStyle);
         }
         catch (Exception ex)
         {
@@ -427,7 +445,7 @@ public class Core : MelonMod
     }
 
     // ══════════════════════════════════════════════════════
-    //  主绘制
+    //  主绘制（所有 Rect 都走 R() 以乘 S）
     // ══════════════════════════════════════════════════════
     private void DrawWindow(int windowID)
     {
@@ -440,40 +458,16 @@ public class Core : MelonMod
             GUIStyle waitStyle = _waitStyle ?? GUI.skin.label;
             GUIStyle barStyle = _barStyle ?? GUI.skin.label;
             GUIStyle warnStyle = _warnStyle ?? GUI.skin.label;
+            GUIStyle closeStyle = _closeStyle ?? GUI.skin.button;
 
-            // ── 手动拖动窗口（GUI.DragWindow 在 matrix 缩放下 delta 会错乱） ──
-            Rect titleBar = new Rect(0f, 0f, _windowRect.width - 30f, 30f);
-            Vector2 mouseLogical = GetGuiMousePosition();
+            float W = _windowRect.width;
+            float H = _windowRect.height;
 
-            if (Event.current != null)
-            {
-                switch (Event.current.type)
-                {
-                    case EventType.MouseDown:
-                        if (titleBar.Contains(mouseLogical))
-                        {
-                            _isDraggingWindow = true;
-                            _dragStartMouse = mouseLogical;
-                            _dragStartWindowPos = new Vector2(_windowRect.x, _windowRect.y);
-                        }
-                        break;
-
-                    case EventType.MouseDrag:
-                        if (_isDraggingWindow)
-                        {
-                            _windowRect.x = _dragStartWindowPos.x + (mouseLogical.x - _dragStartMouse.x);
-                            _windowRect.y = _dragStartWindowPos.y + (mouseLogical.y - _dragStartMouse.y);
-                        }
-                        break;
-
-                    case EventType.MouseUp:
-                        _isDraggingWindow = false;
-                        break;
-                }
-            }
+            // 标题栏拖动
+            GUI.DragWindow(R(0f, 0f, W - 30f, 30f));
 
             // 关闭按钮
-            if (GUI.Button(new Rect(_windowRect.width - 25f, 2f, 20f, 20f), "×"))
+            if (GUI.Button(R(W - 25f, 2f, 20f, 20f), "×", closeStyle))
             {
                 _isUIVisible = false;
                 _cfgShowUI.Value = false;
@@ -484,18 +478,16 @@ public class Core : MelonMod
             float textAlpha = Mathf.Clamp(_cfgTextOpacity?.Value ?? 1f, 0.3f, 1f);
             GUI.color = new Color(1f, 1f, 1f, textAlpha);
 
-            float width = _windowRect.width;
-            float height = _windowRect.height;
-            float contentW = Mathf.Min(width - 24f, 320f);
-            float contentX = (width - contentW) * 0.5f;
+            float contentW = Mathf.Min(W - 24f, 320f);
+            float contentX = (W - contentW) * 0.5f;
             float y = 34f;
 
             // ── 未就绪 ───────────────────────────────────
             if (!_dataReady)
             {
-                GUI.Label(new Rect(contentX, y + 60f, contentW, 24f),
+                GUI.Label(R(contentX, y + 60f, contentW, 24f),
                     "等待进入游戏或加载存档...", waitStyle);
-                GUI.Label(new Rect(contentX, height - 24f, contentW, 18f),
+                GUI.Label(R(contentX, H - 24f, contentW, 18f),
                     $"快捷键: {_cfgToggleKey.Value} 开关面板", hotkeyStyle);
                 GUI.color = savedColor;
                 return;
@@ -505,32 +497,32 @@ public class Core : MelonMod
             if (!_isSentinel)
             {
                 titleStyle.normal.textColor = new Color(0.6f, 0.6f, 0.6f);
-                GUI.Label(new Rect(contentX, y, contentW, 22f), "未选择哨兵 perk", titleStyle);
+                GUI.Label(R(contentX, y, contentW, 24f), "未选择哨兵 perk", titleStyle);
                 y += 32f;
-                GUI.Label(new Rect(contentX, y, contentW, 20f), "哨兵机制未激活", tipStyle);
-                y += 24f;
-                GUI.Label(new Rect(contentX, y, contentW, 20f),
+                GUI.Label(R(contentX, y, contentW, 22f), "哨兵机制未激活", tipStyle);
+                y += 26f;
+                GUI.Label(R(contentX, y, contentW, 22f),
                     "（选择 sentinel 起始 perk 后生效）", tipStyle);
-                y += 24f;
-                GUI.Label(new Rect(contentX, y, contentW, 20f),
+                y += 26f;
+                GUI.Label(R(contentX, y, contentW, 22f),
                     "原版哨兵：只涨池，不掉血；池 ≥ 20 触发哨兵崩溃", tipStyle);
 
-                GUI.Label(new Rect(contentX, height - 24f, contentW, 18f),
+                GUI.Label(R(contentX, H - 24f, contentW, 18f),
                     $"快捷键: {_cfgToggleKey.Value} · 池只增不减", hotkeyStyle);
                 GUI.color = savedColor;
                 return;
             }
 
-            // ── 阶段标题 ──────────────────────────────────
+            // ── 阶段标题 ─────────────────────────────────
             string phaseText = GetPhaseText(_displayD);
             titleStyle.normal.textColor = GetPhaseColor(_displayD);
-            GUI.Label(new Rect(contentX, y, contentW, 22f), phaseText, titleStyle);
-            y += 28f;
+            GUI.Label(R(contentX, y, contentW, 24f), phaseText, titleStyle);
+            y += 32f;
 
             // ── 天数 ─────────────────────────────────────
-            GUI.Label(new Rect(contentX, y, contentW, 20f),
+            GUI.Label(R(contentX, y, contentW, 22f),
                 $"距离上次打针：{_displayD} 天", dataStyle);
-            y += 22f;
+            y += 26f;
 
             // ── 涨速 ─────────────────────────────────────
             int rate = GetPoolRate(_displayD);
@@ -539,70 +531,70 @@ public class Core : MelonMod
                 rateText = (_displayD == 6) ? "今晚仅弹提示，不涨池" : "当前涨速：0 / 晚";
             else
                 rateText = $"当前涨速：+{rate} / 晚";
-            GUI.Label(new Rect(contentX, y, contentW, 20f), rateText, tipStyle);
-            y += 22f;
+            GUI.Label(R(contentX, y, contentW, 22f), rateText, tipStyle);
+            y += 26f;
 
             // ── 池进度 ───────────────────────────────────
             int pool = Mathf.Clamp(_displayPool, 0, POOL_MAX);
             barStyle.normal.textColor = GetPoolColor(pool);
-            GUI.Label(new Rect(contentX, y, contentW, 20f),
+            GUI.Label(R(contentX, y, contentW, 22f),
                 $"损伤池：{pool} / {POOL_MAX}", barStyle);
-            y += 22f;
-            GUI.Label(new Rect(contentX, y, contentW, 20f),
-                BuildProgressBar(pool, POOL_MAX, 20), barStyle);
             y += 26f;
+            GUI.Label(R(contentX, y, contentW, 22f),
+                BuildProgressBar(pool, POOL_MAX, 20), barStyle);
+            y += 30f;
 
             // ── 死亡倒计时 ───────────────────────────────
             int nightsLeft = NightsToDeath(_displayD, _displayPool);
             if (nightsLeft == 0)
             {
                 warnStyle.normal.textColor = new Color(1f, 0f, 0f);
-                GUI.Label(new Rect(contentX, y, contentW, 22f),
+                GUI.Label(R(contentX, y, contentW, 24f),
                     "⚠ 池已满，本晚必死", warnStyle);
             }
             else if (nightsLeft > 0)
             {
                 warnStyle.normal.textColor = GetCountdownColor(nightsLeft);
-                GUI.Label(new Rect(contentX, y, contentW, 22f),
+                GUI.Label(R(contentX, y, contentW, 24f),
                     $"若不注射，预计 {nightsLeft} 晚后哨兵崩溃", warnStyle);
             }
             else
             {
-                GUI.Label(new Rect(contentX, y, contentW, 22f),
+                GUI.Label(R(contentX, y, contentW, 24f),
                     "不会崩溃（当前涨速为 0）", tipStyle);
             }
-            y += 26f;
+            y += 30f;
 
             // ── 建议 ─────────────────────────────────────
-            GUI.Label(new Rect(contentX, y, contentW, 20f),
+            GUI.Label(R(contentX, y, contentW, 22f),
                 GetAdvice(_displayD, _displayPool, rate), tipStyle);
-            y += 24f;
+            y += 28f;
 
             // ── 免疫宁提示 ───────────────────────────────
             if (_cfgShowImmunivaxHint != null && _cfgShowImmunivaxHint.Value)
             {
-                y += 4f;
-                GUI.Label(new Rect(contentX, y, contentW, 18f),
+                y += 6f;
+                GUI.Label(R(contentX, y, contentW, 20f),
                     "免疫宁效果（按成色）", tipStyle);
-                y += 18f;
-                GUI.Label(new Rect(contentX, y, contentW, 18f),
+                y += 22f;
+                GUI.Label(R(contentX, y, contentW, 20f),
                     "真品 → 天数 0 ｜ 过期 → 3 ｜ 假货 → 3/4/5", tipStyle);
-                y += 18f;
-                GUI.Label(new Rect(contentX, y, contentW, 18f),
+                y += 22f;
+                GUI.Label(R(contentX, y, contentW, 20f),
                     "※ 任何针都不降损伤池", tipStyle);
-                y += 18f;
+                y += 22f;
             }
 
             // ── v1.2.0：真品 -1 池 提示 ──────────────────
             if (CfgReducePoolOnGenuineInject != null && CfgReducePoolOnGenuineInject.Value)
             {
                 y += 4f;
-                GUI.Label(new Rect(contentX, y, contentW, 18f),
+                GUI.Label(R(contentX, y, contentW, 20f),
                     "★ 真品免疫宁：每次 -1 损伤池", tipStyle);
             }
 
             // ── 底部提示 ─────────────────────────────────
-            GUI.Label(new Rect(contentX, height - 24f, contentW, 18f),
+            GUI.Label(R(contentX, H - 24f, contentW, 18f),
                 $"快捷键: {_cfgToggleKey.Value} · 池只增不减", hotkeyStyle);
 
             GUI.color = savedColor;
