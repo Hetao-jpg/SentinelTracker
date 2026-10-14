@@ -22,6 +22,7 @@ public class Core : MelonMod
     private static MelonPreferences_Entry<float> _cfgHandleOpacity;
     private static MelonPreferences_Entry<bool> _cfgShowOnlyWhenSentinel;
     private static MelonPreferences_Entry<bool> _cfgShowImmunivaxHint;
+    private static MelonPreferences_Entry<float> _cfgUIScale;
 
     // v1.2.0 新增：真品免疫宁 -1 池
     internal static MelonPreferences_Entry<bool> CfgReducePoolOnGenuineInject;
@@ -37,10 +38,18 @@ public class Core : MelonMod
     private bool _dataReady;
     private bool _isUIVisible;
 
+    // UI 缩放
+    private float _currentScale = 1f;
+
     private Rect _windowRect = new Rect(20f, 20f, 360f, 360f);
     private bool _isResizing;
     private Vector2 _resizeStartMouse;
     private Vector2 _resizeStartSize;
+
+    // 窗口拖动状态（替代 GUI.DragWindow）
+    private bool _isDraggingWindow;
+    private Vector2 _dragStartMouse;
+    private Vector2 _dragStartWindowPos;
 
     // ── 样式 ────────────────────────────────────────────────
     private GUIStyle _titleStyle;
@@ -53,7 +62,7 @@ public class Core : MelonMod
     private bool _stylesReady;
     private static GUIStyle _handleStyle;
 
-    // ── 常量 ────────────────────────────────────────────────
+    // ── 常量（逻辑像素，会随 UIScale 一起放大） ──────────────
     private const float PANEL_MIN_W = 300f;
     private const float PANEL_MIN_H = 240f;
     private const float PANEL_MAX_W = 800f;
@@ -90,11 +99,11 @@ public class Core : MelonMod
             false, false, (ValueValidator)null, (string)null);
 
         _cfgPanelWidth = _cfgCategory.CreateEntry<float>(
-            "PanelWidth", 360f, "面板宽度", "面板宽度（像素，拖右下角调整）",
+            "PanelWidth", 360f, "面板宽度", "面板宽度（逻辑像素，拖右下角调整）",
             false, false, (ValueValidator)null, (string)null);
 
         _cfgPanelHeight = _cfgCategory.CreateEntry<float>(
-            "PanelHeight", 360f, "面板高度", "面板高度（像素，拖右下角调整）",
+            "PanelHeight", 360f, "面板高度", "面板高度（逻辑像素，拖右下角调整）",
             false, false, (ValueValidator)null, (string)null);
 
         _cfgHandleOpacity = _cfgCategory.CreateEntry<float>(
@@ -110,6 +119,12 @@ public class Core : MelonMod
         _cfgShowImmunivaxHint = _cfgCategory.CreateEntry<bool>(
             "ShowImmunivaxHint", true, "显示免疫宁提示",
             "在面板下方显示免疫宁成色效果速查",
+            false, false, (ValueValidator)null, (string)null);
+
+        // ── UI 自适应缩放 ──
+        _cfgUIScale = _cfgCategory.CreateEntry<float>(
+            "UIScale", 0f, "UI 缩放",
+            "0=自动按屏幕高度缩放（1080p≈1.2）。手动值范围 0.5~3.0。改后需重启。",
             false, false, (ValueValidator)null, (string)null);
 
         // ── v1.2.0：真品免疫宁 -1 池 ──
@@ -139,7 +154,7 @@ public class Core : MelonMod
             LoggerInstance.Error("Harmony patch 失败: " + ex);
         }
 
-        LoggerInstance.Msg($"v1.2.0 已加载，按 {_cfgToggleKey.Value} 开关面板");
+        LoggerInstance.Msg($"v1.3.0 已加载，按 {_cfgToggleKey.Value} 开关面板");
     }
 
     // ══════════════════════════════════════════════════════
@@ -259,6 +274,18 @@ public class Core : MelonMod
     }
 
     // ══════════════════════════════════════════════════════
+    //  自适应缩放
+    // ══════════════════════════════════════════════════════
+    private float ResolveScale()
+    {
+        if (_cfgUIScale != null && _cfgUIScale.Value > 0f)
+            return Mathf.Clamp(_cfgUIScale.Value, 0.5f, 3.0f);
+
+        // 自动：以 1080p 为基准再放大 1.2 倍（原版字体在 1080p 下偏小）
+        return Mathf.Clamp(Screen.height / 1080f * 1.2f, 0.75f, 3.0f);
+    }
+
+    // ══════════════════════════════════════════════════════
     //  OnGUI
     // ══════════════════════════════════════════════════════
     public override void OnGUI()
@@ -267,13 +294,18 @@ public class Core : MelonMod
 
         int savedDepth = GUI.depth;
         Color savedColor = GUI.color;
+        Matrix4x4 savedMatrix = GUI.matrix;
 
         try
         {
             EnsureStyles();
             if (!_stylesReady) return;
 
+            _currentScale = ResolveScale();
+
             GUI.depth = 33000;
+            GUI.matrix = Matrix4x4.Scale(new Vector3(_currentScale, _currentScale, 1f));
+
             float panelAlpha = Mathf.Clamp(_cfgPanelOpacity?.Value ?? 0.9f, 0.1f, 1f);
             GUI.color = new Color(1f, 1f, 1f, panelAlpha);
 
@@ -307,17 +339,24 @@ public class Core : MelonMod
         }
         finally
         {
+            GUI.matrix = savedMatrix;
             GUI.color = savedColor;
             GUI.depth = savedDepth;
         }
     }
 
     // ══════════════════════════════════════════════════════
-    //  缩放
+    //  鼠标 / 缩放
     // ══════════════════════════════════════════════════════
-    private static Vector2 GetGuiMousePosition()
+    /// <summary>
+    /// 返回 IMGUI 逻辑坐标（已逆变换 scale）。
+    /// </summary>
+    private Vector2 GetGuiMousePosition()
     {
-        return new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+        float s = _currentScale > 0f ? _currentScale : 1f;
+        return new Vector2(
+            Input.mousePosition.x / s,
+            (Screen.height - Input.mousePosition.y) / s);
     }
 
     private void HandleResizeInput()
@@ -402,8 +441,38 @@ public class Core : MelonMod
             GUIStyle barStyle = _barStyle ?? GUI.skin.label;
             GUIStyle warnStyle = _warnStyle ?? GUI.skin.label;
 
-            GUI.DragWindow(new Rect(0f, 0f, _windowRect.width - 30f, 30f));
+            // ── 手动拖动窗口（GUI.DragWindow 在 matrix 缩放下 delta 会错乱） ──
+            Rect titleBar = new Rect(0f, 0f, _windowRect.width - 30f, 30f);
+            Vector2 mouseLogical = GetGuiMousePosition();
 
+            if (Event.current != null)
+            {
+                switch (Event.current.type)
+                {
+                    case EventType.MouseDown:
+                        if (titleBar.Contains(mouseLogical))
+                        {
+                            _isDraggingWindow = true;
+                            _dragStartMouse = mouseLogical;
+                            _dragStartWindowPos = new Vector2(_windowRect.x, _windowRect.y);
+                        }
+                        break;
+
+                    case EventType.MouseDrag:
+                        if (_isDraggingWindow)
+                        {
+                            _windowRect.x = _dragStartWindowPos.x + (mouseLogical.x - _dragStartMouse.x);
+                            _windowRect.y = _dragStartWindowPos.y + (mouseLogical.y - _dragStartMouse.y);
+                        }
+                        break;
+
+                    case EventType.MouseUp:
+                        _isDraggingWindow = false;
+                        break;
+                }
+            }
+
+            // 关闭按钮
             if (GUI.Button(new Rect(_windowRect.width - 25f, 2f, 20f, 20f), "×"))
             {
                 _isUIVisible = false;
