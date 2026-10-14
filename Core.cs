@@ -260,13 +260,30 @@ public class Core : MelonMod
 
             HandleResizeInput();
 
-            // Il2CppInterop 提供 Action<int> → GUI.WindowFunction 的隐式转换
-            _windowRect = GUI.Window(
-                98765, _windowRect,
-                (Action<int>)DrawWindow,
-                "哨兵综合症监控");
+            // “仅哨兵显示”且已读数据且当前不是哨兵 → 完全不画窗口
+            bool hideForNonSentinel =
+                _dataReady &&
+                !_isSentinel &&
+                _cfgShowOnlyWhenSentinel != null &&
+                _cfgShowOnlyWhenSentinel.Value;
 
-            DrawResizeHandle();
+            if (!hideForNonSentinel)
+            {
+                // Il2CppInterop 提供 Action<int> → GUI.WindowFunction 的隐式转换
+                _windowRect = GUI.Window(
+                    98765, _windowRect,
+                    (Action<int>)DrawWindow,
+                    "哨兵综合症监控");
+
+                DrawResizeHandle();
+            }
+
+            // 拖动/缩放后保存位置（放在 GUI.Window 之后更稳）
+            if (Event.current != null && Event.current.type == EventType.MouseUp)
+            {
+                PlayerPrefs.SetFloat(PP_PANEL_X, _windowRect.x);
+                PlayerPrefs.SetFloat(PP_PANEL_Y, _windowRect.y);
+            }
         }
         catch (Exception ex)
         {
@@ -402,14 +419,9 @@ public class Core : MelonMod
             }
 
             // ── 非哨兵 ───────────────────────────────────
+            // 注：若开启“仅哨兵显示”，OnGUI 已经跳过整个窗口，不会走到这里。
             if (!_isSentinel)
             {
-                if (_cfgShowOnlyWhenSentinel != null && _cfgShowOnlyWhenSentinel.Value)
-                {
-                    GUI.color = savedColor;
-                    return;
-                }
-
                 titleStyle.normal.textColor = new Color(0.6f, 0.6f, 0.6f);
                 GUI.Label(new Rect(contentX, y, contentW, 22f), "未选择哨兵 perk", titleStyle);
                 y += 32f;
@@ -503,13 +515,6 @@ public class Core : MelonMod
                 $"快捷键: {_cfgToggleKey.Value} · 池只增不减", hotkeyStyle);
 
             GUI.color = savedColor;
-
-            // 鼠标松开时保存位置
-            if (Event.current != null && Event.current.type == EventType.MouseUp)
-            {
-                PlayerPrefs.SetFloat(PP_PANEL_X, _windowRect.x);
-                PlayerPrefs.SetFloat(PP_PANEL_Y, _windowRect.y);
-            }
         }
         catch (Exception ex)
         {
@@ -597,11 +602,14 @@ public class Core : MelonMod
 
         if (days < 7)
         {
+            // safe = 从今晚起，还能“不涨池”的夜数
+            // days==5 → 今晚结算 days→6，仍 +0 → safe=1
+            // days==6 → 今晚结算 days→7，开始 +1  → safe=0
             int safe = 6 - days;
             if (safe < 0) safe = 0;
             if (safe == 0)
-                return "⚠ 今晚起开始发病，下一晚起开始涨池。";
-            return $"✅ 还能安全 {safe} 晚，建议尽早打真品针归零。";
+                return "⚠ 今晚结算后 days→7，开始 +1 涨池。";
+            return $"✅ 还能安全 {safe} 晚（到第 6 晚为止），建议尽早打真品针归零。";
         }
 
         if (pool >= POOL_WARN_FINAL)
@@ -609,9 +617,7 @@ public class Core : MelonMod
         if (pool >= POOL_WARN_ADVANCED)
             return "⚠ 池已 ≥10，尽快打真品免疫宁止损。";
 
-        if (rate > 0)
-            return "💡 已开始涨池，打真品针可重置天数（池不变）。";
-
-        return "✅ 当前安全，无需打针。";
+        // days >= 7 时 rate 必然 ≥ 1，这里的 rate 只是保留参数以示可扩展
+        return "💡 已开始涨池，打真品针可重置天数（池不变）。";
     }
 }
