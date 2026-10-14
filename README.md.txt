@@ -1,10 +1,11 @@
 # 哨兵综合症监控 SentinelTracker
 
 **作者**：核桃
-**最新版本**：1.1.0
+**最新版本**：1.2.0
 **兼容游戏**：Probably Stolen 0.46D
 **兼容环境**：MelonLoader 7.4 及以上
 
+> v1.2.0 新增：可选开启“真品免疫宁 -1 损伤池”，默认关闭。
 > v1.1.0 起，面板严格对齐游戏代码事实：
 > 哨兵**不掉血**，只有“天数计时器 + 只增不减的损伤池”，
 > 死亡判据是 **池 ≥ 20**，与天数阶段无关。
@@ -23,6 +24,7 @@
 - **距哨兵崩溃还有几晚**（按当前涨速模拟）
 - 打针建议与“最迟打针”提示
 - 免疫宁成色效果速查
+- **真品免疫宁 -1 损伤池**（可选，cfg 开关，默认关闭）
 
 窗口**可拖动、可缩放、可调透明度**，位置和尺寸都会自动保存。
 
@@ -65,7 +67,9 @@
 - **不打针时间线**：选哨兵且一支针不打，第 16 晚必死。
 - **安全节奏**：约每 5 天打一支真品针，池永远停在 0。
 - **哨兵不掉血**：游戏里哨兵的唯一后果是涨池 → 写夜间日志 → 池到 20 崩死。
-
+- **真品 -1 池（mod 新增，可选）**：开启 `ReducePoolOnGenuineInject` 后，
+-  每注射一支**真品**免疫宁，损伤池 -1（下限 0）。过期、假货、空针不减。
+-  该功能默认关闭，开启后与“池只增不减”的原版规则不同。
 ### 免疫宁成色
 
 | 成色 | 天数结果 | 备注 |
@@ -75,9 +79,10 @@
 | 假货 `counterfeitInjector` | → 3/4/5 随机 | 效果不稳 |
 | 其它 / 空 | 不变 | 无效操作，只播体感文案 |
 
-**任何针都不降 `sentinelPool`。**
+**原版任何针都不降 `sentinelPool`。**
+开启 mod 的 `ReducePoolOnGenuineInject` 后，真品每次 -1（见上）。
 
-## 配置项（共 9 项）
+## ## 配置项（共 10 项
 
 | 配置项 | 默认 | 说明 |
 |--------|------|------|
@@ -90,6 +95,7 @@
 | PanelHeight | 340 | 面板高度（像素） |
 | **ShowOnlyWhenSentinel** | ❌ 关 | 非哨兵存档隐藏监控内容 |
 | **ShowImmunivaxHint** | ✅ 开 | 显示免疫宁成色速查 |
+| **ReducePoolOnGenuineInject** | ❌ 关 | 真品免疫宁每次 -1 损伤池（mod 新增，改后需重启） |
 
 > **面板位置**不在 cfg 里 —— 玩家拖动即可，位置存到 `PlayerPrefs`，跨存档共享。
 
@@ -119,7 +125,10 @@ HandleOpacity = 0.8
 - **`GUI.depth` / `GUI.color` 的 try-finally 恢复**：`GUI.Window` 内部抛异常时不恢复会污染全局状态
 - **哨兵判定双重回退**：优先 `HealthData.IsSentinel()`，异常时回退到手动遍历 `startingPerks`
 - **`ShowOnlyWhenSentinel` 时跳过整个窗口**：避免出现“只剩标题栏、没有关闭按钮”的空白窗口
-
+- **Harmony Postfix 挂钩**：通过 `HarmonyLib.Harmony` 对
+-  `HealthData.ConsumeImmunivax` 打 Postfix，实现“真品 -1 池”。
+-  真品判定走 `ItemFeature.realCondition.identifier == "genuineInjector"`，
+-  与反汇编中 `ConsumeImmunivax` 的判定路径完全一致。
 ## 已知限制
 
 - **面板必须在游戏内进图后才有数据**：主菜单下显示“等待进入游戏或加载存档...”
@@ -129,7 +138,8 @@ HandleOpacity = 0.8
 - **内容块居中布局**：内容宽度上限 320px，窗口拉大时内容块居中，四周均匀留白
 - **免疫宁成色提示为静态文案**：未读取库存，只作为速查参考
 - **死亡倒计时按“今晚睡前”起算**：面板不区分玩家是否已入睡，显示的“N 晚后崩溃”是 OnSleep 结算后的预期
-
+- **`ReducePoolOnGenuineInject` 改动需重启**：MelonPreferences 启动时读取，
+-  改 cfg 后必须重启游戏；该项在面板上有独立提示行
 ## 排障
 
 ### 面板打不开
@@ -161,7 +171,20 @@ MelonLoader 读取 cfg 是**启动时**。改完 cfg 需要重启游戏。
 
 ## 更新日志
 
-### v1.1.0（当前版本）
+### v1.2.0（当前版本）
+
+**新增：真品免疫宁 -1 损伤池（可选）**
+
+- 新增 Harmony 补丁，Postfix 挂 `HealthData.ConsumeImmunivax`
+- 精确判定真品：`ItemFeature.realCondition.identifier == "genuineInjector"`，
+ 与反汇编中原版判定路径一致；读不到时用“days 从非 0 变 0”兜底
+- 每注射一支真品，`sentinelPool -= 1`（池已为 0 时不减）
+- 过期 / 假货 / 空针不减池，行为与原版一致
+- 新增配置项 `ReducePoolOnGenuineInject`（默认关闭）
+- 面板在开启该功能时显示“★ 真品免疫宁：每次 -1 损伤池”
+- 配置项总数 9 → 10，面板默认高度 340 → 360 以容纳新增信息
+
+ ### v1.1.0
 
 **新增：机制对齐与预警**
 
