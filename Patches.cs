@@ -14,20 +14,17 @@ internal static class ConsumeImmunivaxPatch
     }
 
     [HarmonyPostfix]
-    private static void Postfix(HealthData __instance, int __state, GameItem item)
+    private static void Postfix(HealthData __instance, int __state, GameItem gameItem)
     {
-        // 1) 配置开关
         if (Core.CfgReducePoolOnGenuineInject == null ||
             !Core.CfgReducePoolOnGenuineInject.Value)
             return;
 
-        // 2) 精确判定（含 days 变化兜底）
         bool isGenuine = InjectorInspection.IsGenuineWithFallback(
-            item, __state, __instance.daysSinceSentinelInjection);
+            gameItem, __state, __instance.daysSinceSentinelInjection);
 
         if (!isGenuine) return;
 
-        // 3) 减池，防负数
         int cur = __instance.sentinelPool;
         if (cur <= 0)
         {

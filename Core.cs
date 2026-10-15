@@ -114,13 +114,13 @@ public class Core : MelonMod
 
         _cfgUIScale = _cfgCategory.CreateEntry<float>(
             "UIScale", 0f, "UI 缩放",
-            "0=自动按屏幕高度缩放（1080p=1.0，1440p≈1.25，4K≈2.0）。手动值 0.5~3.0。改后需重启。",
+            "0=自动按屏幕高度缩放（1080p=1.0，1440p≈1.25，4K≈2.0）。手动值 0.5~3.0。修改后立即生效。",
             false, false, (ValueValidator)null, (string)null);
 
         CfgReducePoolOnGenuineInject = _cfgCategory.CreateEntry<bool>(
-            "ReducePoolOnGenuineInject", false, "真品免疫宁 -1 损伤池",
-            "每注射一支真品免疫宁，损伤池 -1（原版不降）。改后需重启。",
-            false, false, (ValueValidator)null, (string)null);
+        "ReducePoolOnGenuineInject", false, "真品免疫宁 -1 损伤池",
+        "每注射一支真品免疫宁，损伤池 -1（原版不降）。直接改 cfg 文件需重启；游戏内管理器修改可即时生效。",
+        false, false, (ValueValidator)null, (string)null);
 
         _cfgCategory.SaveToFile(true);
         _isUIVisible = _cfgShowUI.Value;
@@ -130,18 +130,7 @@ public class Core : MelonMod
         _windowRect.width = Mathf.Clamp(_cfgPanelWidth.Value, PANEL_MIN_W, PANEL_MAX_W);
         _windowRect.height = Mathf.Clamp(_cfgPanelHeight.Value, PANEL_MIN_H, PANEL_MAX_H);
 
-        try
-        {
-            new HarmonyLib.Harmony("SentinelTracker.Patches")
-                .PatchAll(typeof(Core).Assembly);
-            LoggerInstance.Msg("Harmony patch 已应用");
-        }
-        catch (Exception ex)
-        {
-            LoggerInstance.Error("Harmony patch 失败: " + ex);
-        }
-
-        LoggerInstance.Msg($"v1.4.1 已加载，按 {_cfgToggleKey.Value} 开关面板");
+        LoggerInstance.Msg($"v{Info.Version} 已加载，按 {_cfgToggleKey.Value} 开关面板");
     }
 
     // ══════════════════════════════════════════════════════
@@ -365,6 +354,7 @@ public class Core : MelonMod
             {
                 PlayerPrefs.SetFloat(PP_PANEL_X, _windowRect.x);
                 PlayerPrefs.SetFloat(PP_PANEL_Y, _windowRect.y);
+                PlayerPrefs.Save();
             }
         }
         catch (Exception ex)
@@ -464,12 +454,17 @@ public class Core : MelonMod
 
             GUI.DragWindow(R(0f, 0f, W - 30f, 28f));
 
+            Color oldBtnColor = GUI.color;
+            GUI.color = new Color(1f, 1f, 1f, 1f);
+
             if (GUI.Button(R(W - 25f, 2f, 20f, 20f), "×", closeStyle))
             {
                 _isUIVisible = false;
                 _cfgShowUI.Value = false;
                 MelonPreferences.Save();
             }
+
+            GUI.color = oldBtnColor;
 
             Color savedColor = GUI.color;
             float textAlpha = Mathf.Clamp(_cfgTextOpacity?.Value ?? 1f, 0.3f, 1f);

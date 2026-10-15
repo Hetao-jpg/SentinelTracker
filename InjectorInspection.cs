@@ -21,6 +21,9 @@ internal static class InjectorInspection
     public const string SUBTYPE_EXPIRED = "expiredInjector";
     public const string SUBTYPE_COUNTERFEIT = "counterfeitInjector";
 
+    // ── 新增：只警告一次，避免日志刷屏 ──────────────────
+    private static bool _warnedReadCondition;
+
     /// <summary>
     /// 读该注射器的 subtype 字符串。
     /// 返回 null 表示：物品为 null / 无 CATEGORY_GENUINE_INJECTOR 特征 / realCondition 为空 / 读异常。
@@ -41,7 +44,12 @@ internal static class InjectorInspection
         }
         catch (Exception ex)
         {
-            MelonLogger.Warning("[SentinelTracker] 读 ItemCondition 失败: " + ex.Message);
+            // ── 修改：只在第一次失败时输出警告 ──────────
+            if (!_warnedReadCondition)
+            {
+                _warnedReadCondition = true;
+                MelonLogger.Warning("[SentinelTracker] 读 ItemCondition 失败: " + ex.Message);
+            }
             return null;
         }
     }
